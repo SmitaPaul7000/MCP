@@ -1,0 +1,54 @@
+from langgraph.graph import StateGraph
+from langchain_openai import ChatOpenAI
+from langchain.memory import ConversationBufferMemory
+from langchain.agents import initialize_agent, AgentType
+from utils import diff
+from memory import update_memory, get_last
+
+llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
+# Create conversation memories for each agent
+risk_memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+ras_memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+icap_memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+
+async def risk_node(state):
+    last = get_last("risk")
+    new_data = "RISK report ID=123, status=OK"
+    update_memory("risk", new_data)
+    d = diff(last, new_data)
+
+    # Let LLM contextualize response with memory
+    agent = initialize_agent([], llm, agent=AgentType.CONVERSATIONAL_REACT_DESCRIPTION, memory=risk_memory, verbose=False)
+    result = agent.run(f"User asked about risk: {state['query']}. Data: {d}")
+    return {"answer": result}
+
+async def ras_node(state):
+    last = get_last("ras")
+    new_data = "RAS regulatory dataset version=5"
+    update_memory("ras", new_data)
+    d = diff(last, new_data)
+
+    agent = initialize_agent([], llm, agent=AgentType.CONVERSATIONAL_REACT_DESCRIPTION, memory=ras_memory, verbose=False)
+    result = agent.run(f"User asked about RAS: {state['query']}. Data: {d}")
+    return {"answer": result}
+
+async def icap_node(state):
+    last = get_last("icap")
+    new_data = "ICAP capital ratio=12.5%"
+    update_memory("icap", new_data)
+    d = diff(last, new_data)
+
+    agent = initialize_agent([], llm, agent=AgentType.CONVERSATIONAL_REACT_DESCRIPTION, memory=icap_memory, verbose=False)
+    result = agent.run(f"User asked about ICAP: {state['query']}. Data: {d}")
+    return {"answer": result}
+
+def build_agent(node_fn):
+    sg = StateGraph(dict)
+    sg.add_node("main", node_fn)
+    sg.set_entry_point("main")
+    return sg.compile()
+
+risk_agent = build_agent(risk_node)
+ras_agent = build_agent(ras_node)
+icap_agent = build_agent(icap_node)
