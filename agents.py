@@ -1,35 +1,56 @@
-
+# agents.py
 from langgraph.graph import StateGraph
-from langchain_openai import ChatOpenAI
-import asyncio
-from typing import Dict
-from utils import diff, stream_text
+from langchain.llms.fake import FakeListLLM
+from langchain.memory import ConversationBufferMemory
+from langchain.agents import initialize_agent, AgentType
+from utils import diff
 from memory import update_memory, get_last
 
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+# Fake LLM that cycles through fixed responses
+llm = FakeListLLM(responses=[
+    "This is a fake response about risk.",
+    "This is a fake response about ras.",
+    "This is a fake response about icap.",
+])
 
-async def risk_node(state: Dict):
+# Create conversation memories for each agent
+risk_memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+ras_memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+icap_memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+
+async def risk_node(state):
     last = get_last("risk")
     new_data = "RISK report ID=123, status=OK"
     update_memory("risk", new_data)
     d = diff(last, new_data)
-    return {"answer": d}
 
-async def ras_node(state: Dict):
+    agent = initialize_agent([], llm, agent=AgentType.CONVERSATIONAL_REACT_DESCRIPTION,
+                             memory=risk_memory, verbose=False)
+    result = agent.run(f"User asked about risk: {state['query']}. Data: {d}")
+    return {"answer": result}
+
+async def ras_node(state):
     last = get_last("ras")
     new_data = "RAS regulatory dataset version=5"
     update_memory("ras", new_data)
     d = diff(last, new_data)
-    return {"answer": d}
 
-async def icap_node(state: Dict):
+    agent = initialize_agent([], llm, agent=AgentType.CONVERSATIONAL_REACT_DESCRIPTION,
+                             memory=ras_memory, verbose=False)
+    result = agent.run(f"User asked about RAS: {state['query']}. Data: {d}")
+    return {"answer": result}
+
+async def icap_node(state):
     last = get_last("icap")
     new_data = "ICAP capital ratio=12.5%"
     update_memory("icap", new_data)
     d = diff(last, new_data)
-    return {"answer": d}
 
-# Build LangGraph graphs for each agent
+    agent = initialize_agent([], llm, agent=AgentType.CONVERSATIONAL_REACT_DESCRIPTION,
+                             memory=icap_memory, verbose=False)
+    result = agent.run(f"User asked about ICAP: {state['query']}. Data: {d}")
+    return {"answer": result}
+
 def build_agent(node_fn):
     sg = StateGraph(dict)
     sg.add_node("main", node_fn)
